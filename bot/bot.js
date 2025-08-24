@@ -1,93 +1,164 @@
-require("dotenv").config();
+import "dotenv/config";
+import { Telegraf, Markup } from "telegraf";
+import { message } from "telegraf/filters";
+import axios from 'axios';
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const API_URL = process.env.API_URL || 'http://localhost:3000/api';
 
-const { Telegraf } = require("telegraf");
-const { message } = require("telegraf/filters");
-const { createWorker } = require("tesseract.js"); // OCR library
-const fetch = require("node-fetch");
-const { HfInference } = require("@huggingface/inference");
-const client = new HfInference(process.env.HUGGINGFACE_API_KEY);
-
-// Initialize bot and OCR pipeline
+// Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+// User session to store temporary data
+const userSessions = new Map();
+
 // Start command
-bot.start((ctx) => ctx.reply("Welcome! Send me a photo of your bill, and I'll extract the price and liters."));
+bot.start((ctx) => {
+    ctx.reply(
+        "Welcome! I'll help you track your expenses. Choose a command:\n" +
+        "/newreceipt - Upload a new receipt\n" +
+        "/stats - View your statistics\n" +
+        "/help - Show help information"
+    );
+});
 
 // Help command
-bot.help((ctx) => ctx.reply("Send me a photo of a bill to extract the price and liters."));
+bot.help((ctx) => {
+    ctx.reply(
+        "Here's how to use this bot:\n\n" +
+        "1. Use /newreceipt to start uploading a receipt\n" +
+        "2. Select a category (Fuel, Groceries, etc.)\n" +
+        "3. Send a photo of your receipt\n" +
+        "4. Use /stats to view your expenses\n" +
+        "5. Use /cancel to cancel current operation"
+    );
+});
+
+// New receipt command
+bot.command('newreceipt', (ctx) => {
+    ctx.reply('Please select a category:', 
+        Markup.inlineKeyboard([
+            [Markup.button.callback('⛽ Fuel', 'category_Fuel')],
+            [Markup.button.callback('🛒 Groceries', 'category_Groceries')],
+            [Markup.button.callback('📝 Other', 'category_Other')]
+        ])
+    );
+});
+
+// Handle category selection
+bot.action(/category_(.+)/, (ctx) => {
+    const category = ctx.match[1];
+    userSessions.set(ctx.from.id, { category });
+    ctx.reply(`Category "${category}" selected. Please send me a photo of your receipt.`);
+});
 
 // Handle photo messages
 bot.on(message("photo"), async (ctx) => {
-  const photo = ctx.message.photo.pop(); // Get the highest resolution photo
-  const fileId = photo.file_id;
+    const userId = ctx.from.id;
+    const userSession = userSessions.get(userId);
 
-  // Step 2: Confirm receipt
-  await ctx.reply("Photo received! Processing...");
+    if (!userSession || !userSession.category) {
+        return ctx.reply("Please select a category first using /newreceipt command.");
+    }
 
-  try {
-    // Step 3: Download photo
-    const fileLink = await ctx.telegram.getFileLink(fileId);
-    const extractedData = await makeRequest(fileLink.href);
+    const photo = ctx.message.photo.pop(); // Get the highest resolution photo
+    const fileId = photo.file_id;
 
-    // const price = extractedData.match(/gesamtbetrag\s*[:\s]*([\d.,]+)/i);
-    // console.log("price:", price);
+    await ctx.reply("Photo received! Processing...");
 
-    // Final step : Reply with the extracted data
-    await ctx.reply(`Extracted Information:\n${extractedData}`);
-  } catch (error) {
-    console.error("\n\nError during photo processing\n\n", error.message);
-    await ctx.reply("Failed to process the photo. Please try again./\n\n", `Error: ${error.message}`);
-  }
+    try {
+        const fileLink = await ctx.telegram.getFileLink(fileId);
+
+
+        // Send to server for processing
+        const response = await axios.post(`${API_URL}/process-receipt`, {
+            imageUrl: fileLink.href,
+            userId: userId,
+            category: userSession.category
+        });
+        
+        const receipt = response.data.data;
+
+        // Clear user session
+        userSessions.delete(userId);
+
+
+        // Show extracted OCR text first
+        await ctx.reply(
+            `📄 OCR Result:\n\n${receipt.rawText || "No text extracted"}`
+        );
+
+        // Then show confirmation of what was stored
+        await ctx.reply(
+            `✅ Receipt saved successfully!\n\n` +
+            `Category: ${userSession.category}\n` +
+            `Amount: $${receipt.amount || "N/A"}\n` +
+            `${userSession.category === 'Fuel' ? `Quantity: ${receipt.quantity || "N/A"}L\n` : ''}` +
+            `Date: ${receipt.date || new Date().toLocaleDateString()}\n` +
+            `${receipt.station ? `Location: ${receipt.station}` : ''}`
+        );
+    } catch (error) {
+        console.error("Error during photo processing:", error);
+        await ctx.reply("Failed to process the photo. Please try again.\n\nError: " + error.message);
+    }
 });
 
-const makeRequest = async (link) => {
-  try {
-    const chatCompletion = await client.chatCompletion({
-      model: "meta-llama/Llama-3.2-11B-Vision-Instruct",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Take the text of the image of the receipt of the gas station and extract the information of the amount, price that I pay for everything, quantity of the litre, price of a litre, then type of fuel, date of this and the address of the gas station and give the extracted data in the JSON Format object and it is very important to have this propertys in JSON Object because it will be uploaded in DB. This object must look like this: 
-                {"amount":"number", "quantity":"number", "fuel": "string", "price":"number", "date":"DD.MM.YYYY", "station":"string"} and just give me this object and nothing more. No comments, notes or explanations from you.`,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: link,
-              },
-            },
-          ],
-        },
-      ],
-      max_tokens: 500,
-    });
-    // Extract content from response
-    const content = chatCompletion.choices[0].message.content;
-    console.log("Hugging Face API Response:", content);
-    // validateJSON(content);
-    return content;
-  } catch (error) {
-    console.error("Hugging Face API Error:", error);
-    throw new Error("Failed to process image using Hugging Face API.");
-  }
-};
 
-// Function: Validate JSON
-const validateJSON = (data) => {
-  try {
-    JSON.parse(data); // Check if data is valid JSON
-  } catch (error) {
-    throw new Error("Invalid JSON format returned from the API.");
-  }
-};
+// Stats command
+bot.command('stats', async (ctx) => {
+    ctx.reply('Choose a time period:', 
+        Markup.inlineKeyboard([
+            [
+                Markup.button.callback('This Month', 'stats_month'),
+                Markup.button.callback('This Year', 'stats_year')
+            ],
+            [Markup.button.callback('All Time', 'stats_all')]
+        ])
+    );
+});
+
+// Handle stats selection
+bot.action(/stats_(.+)/, async (ctx) => {
+    const period = ctx.match[1];
+    const userId = ctx.from.id;
+
+    try {
+        // Get stats from server
+        const response = await axios.get(`${API_URL}/stats/${userId}?period=${period}`);
+        const stats = response.data;
+
+        // Format response
+        let totalAmount = 0;
+
+        for (const [category, data] of Object.entries(stats)) {
+            response += `${category}:\n`;
+            response += `  Total: $${data.total.toFixed(2)}\n`;
+            response += `  Receipts: ${data.count}\n\n`;
+            totalAmount += data.total;
+        }
+
+        response += `💰 Total spending: $${totalAmount.toFixed(2)}`;
+        await ctx.reply(response);
+
+    } catch (error) {
+        console.error("Error fetching stats:", error);
+        await ctx.reply("Sorry, there was an error fetching your statistics.");
+    }
+});
+
+// Cancel command
+bot.command('cancel', (ctx) => {
+    const userId = ctx.from.id;
+    if (userSessions.has(userId)) {
+        userSessions.delete(userId);
+        ctx.reply('Current operation cancelled.');
+    } else {
+        ctx.reply('No active operation to cancel.');
+    }
+});
 
 // Launch the bot
 bot.launch().then(() => console.log("Bot is running!"));
+
 // Graceful shutdown for the bot
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
