@@ -82,18 +82,33 @@ bot.on(message("photo"), async (ctx) => {
         userSessions.delete(userId);
 
 
-        // Show extracted OCR text first
+        // Show extracted OCR text and fields first
         await ctx.reply(
-            `📄 OCR Result:\n\n${receipt.rawText || "No text extracted"}`
+            `📄 OCR Result:\n\n${receipt.rawText || "No text extracted"}\n\nExtracted Data:\n` +
+            `Amount: ${receipt.amount || "❌ not found"}\n` +
+            `Quantity: ${receipt.quantity || "❌ not found"}\n` +
+            `Fuel: ${receipt.fuel || "❌ not found"}\n` +
+            `Price: ${receipt.price || "❌ not found"}\n` +
+            `Date: ${receipt.date ? (typeof receipt.date === 'string' ? receipt.date : receipt.date.toLocaleDateString("de-DE")) : "❌ not found"}\n` +
+            `Station: ${receipt.station || "❌ not found"}`
         );
 
-        // Then show confirmation of what was stored
+        // If not valid, ask user for missing fields
+        if (!receipt.isValid) {
+            await ctx.reply(
+                "❗ Some required fields are missing. Please reply with the correct amount, or send a new photo."
+            );
+            // Optionally, you can add logic to handle user input for missing fields here
+            return;
+        }
+
+        // If valid, show confirmation and save
         await ctx.reply(
-            `✅ Receipt saved successfully!\n\n` +
+            `✅ Receipt ready to be saved!\n\n` +
             `Category: ${userSession.category}\n` +
-            `Amount: $${receipt.amount || "N/A"}\n` +
+            `Amount: $${receipt.amount}\n` +
             `${userSession.category === 'Fuel' ? `Quantity: ${receipt.quantity || "N/A"}L\n` : ''}` +
-            `Date: ${receipt.date || new Date().toLocaleDateString()}\n` +
+            `Date: ${receipt.date ? (typeof receipt.date === 'string' ? receipt.date : receipt.date.toLocaleDateString("de-DE")) : new Date().toLocaleDateString()}\n` +
             `${receipt.station ? `Location: ${receipt.station}` : ''}`
         );
     } catch (error) {
