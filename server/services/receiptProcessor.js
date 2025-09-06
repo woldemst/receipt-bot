@@ -1,28 +1,32 @@
-import fetch from "node-fetch";
 import FormData from "form-data";
+import axios from "axios";
+import "dotenv/config";
 
 class ReceiptProcessor {
+  constructor() {
+    this.API_URL = process.env.API_URL;
+  }
+
   async processImage(imageUrl) {
     try {
       // Lade Bild herunter
-      const imageResp = await fetch(imageUrl);
-      const buffer = await imageResp.buffer();
+      const imageResp = await axios.get(imageUrl, { responseType: "arraybuffer" });
+      const buffer = Buffer.from(imageResp.data);
 
       // Packe Bild in FormData
       const formData = new FormData();
       formData.append("file", buffer, "receipt.jpg");
 
       // Sende an OCR-Server
-      const response = await fetch("http://localhost:8000/ocr", {
-        method: "POST",
-        body: formData,
+      const response = await axios.post(`${API_URL}/ocr`, formData, {
+        headers: formData.getHeaders(),
       });
 
-      const ocrResult = await response.json();
+      const ocrResult = response.data;
       console.log("Tesseract OCR result:", ocrResult);
 
       // Beispiel: aus OCR-Text Betrag und Datum extrahieren
-      
+
       const text = ocrResult.text;
 
       // Betrag finden
@@ -41,16 +45,15 @@ class ReceiptProcessor {
         const [day, month, year] = date.split(".");
         date = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`);
       }
-      
+
       // Extract quantity (liters)
       // Try to match "34,27 L" or "34.27L" or "L 34,27"
-      const quantityMatch = text.match(/(\d+[.,]\d{2})\s*L\b/i) ||
-                            text.match(/L\s*(\d+[.,]\d{2})/i) ||
-                            text.match(/(\d+[.,]\d{2})\s*Liter/i);
+      const quantityMatch =
+        text.match(/(\d+[.,]\d{2})\s*L\b/i) || text.match(/L\s*(\d+[.,]\d{2})/i) || text.match(/(\d+[.,]\d{2})\s*Liter/i);
       const quantity = quantityMatch ? parseFloat(quantityMatch[1].replace(",", ".")) : null;
 
       // Extract fuel type
-      const fuelTypes = ['Super', 'E10', 'Diesel', 'Premium', 'V-Power'];
+      const fuelTypes = ["Super", "E10", "Diesel", "Premium", "V-Power"];
       let fuel = null;
       for (const type of fuelTypes) {
         if (text.toLowerCase().includes(type.toLowerCase())) {
@@ -67,6 +70,9 @@ class ReceiptProcessor {
       }
 
       // Return structured object
+
+      // Build a receipt object from OCR
+
       return {
         amount: amount,
         quantity: quantity,
@@ -74,8 +80,8 @@ class ReceiptProcessor {
         price: price,
         date: date,
         station: station,
-        rawText: ocrResult.text,
-        isValid: !!amount // Only valid if amount is found
+        // rawText: ocrResult.text,
+        isValid: !!ocrResult.text,
       };
     } catch (error) {
       console.error("Receipt processing error:", error);
@@ -85,4 +91,3 @@ class ReceiptProcessor {
 }
 
 export default ReceiptProcessor;
-
