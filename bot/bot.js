@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
-import FormData from "form-data";
 import axios from "axios";
 
 const API_URL = process.env.HOST;
@@ -73,35 +72,33 @@ bot.on(message("photo"), async (ctx) => {
     const fileResp = await axios.get(fileLink.href, { responseType: "arraybuffer" });
     const buffer = Buffer.from(fileResp.data);
 
-    const formData = new FormData();
-    formData.append("file", buffer, "receipt.jpg");
-    formData.append("userId", userId.toString());
-    formData.append("category", userSession.category);
-
-    const response = await axios.post(`${API_URL}/api/process-receipt`, formData, {
-      headers: formData.getHeaders(),
+    const response = await axios.post(`${API_URL}/api/process-receipt`, {
+      imageUrl: fileLink.href,
+      userId,
+      category: userSession.category,
     });
 
-
-    const receipt = response.data;
+    const receipt = response.data.data;
     console.log("gotten receipt", receipt);
 
     // Clear user session
     userSessions.delete(userId);
 
-    // Show extracted OCR text and fields first
+    //  Ask for confirmation
     await ctx.reply(
-      `📄 OCR Result:\n\n${receipt.rawText || "No text extracted"}\n\nExtracted Data:\n` +
-        `Amount: ${receipt.amount || "❌ not found"}\n` +
-        `Quantity: ${receipt.quantity || "❌ not found"}\n` +
-        `Fuel: ${receipt.fuel || "❌ not found"}\n` +
-        `Price: ${receipt.price || "❌ not found"}\n` +
-        `Date: ${
+      "✅ Save this receipt?",
+      Markup.inlineKeyboard([[Markup.button.callback("💾 Save", `save_${userId}`)], [Markup.button.callback("❌ Cancel", "cancel")]])
+    );
+    await ctx.reply(
+      `Amount: ${receipt.amount || "❌ not found"}\n` +
+      `Quantity: ${receipt.quantity || "❌ not found"}\n` +
+      `Fuel: ${receipt.fuel || "❌ not found"}\n` +
+      `Price: ${receipt.price || "❌ not found"}\n` +
+      `Date: ${
           receipt.date ? (typeof receipt.date === "string" ? receipt.date : receipt.date.toLocaleDateString("de-DE")) : "❌ not found"
         }\n` +
-        `Station: ${receipt.station || "❌ not found"}`
+        Markup.inlineKeyboard([[Markup.button.callback("💾 Save", `save_${userId}`)], [Markup.button.callback("❌ Cancel", "cancel")]])
     );
-
     // If not valid, ask user for missing fields
     if (!receipt.isValid) {
       await ctx.reply("❗ Some required fields are missing. Please reply with the correct amount, or send a new photo.");

@@ -1,33 +1,38 @@
 import Receipt from "../models/Receipt.js";
+import ReceiptProcessor from "../services/receiptProcessor.js";
 
+const processor = new ReceiptProcessor();
 export const processReceipt = async (req, res) => {
   try {
-    // const { imageUrl, userId, category } = req.body;
+    const { imageUrl, userId, category } = req.body;
 
-    // console.log("Received request to process receipt:", { imageUrl, userId, category });
+    console.log("Received request to process receipt:", { imageUrl, userId, category });
 
-    // // Process the receipt image
-    // const extractedData = await receiptProcessor.processImage(imageUrl);
+    // Process the receipt image
+    const extractedData = await processor.processImage(imageUrl);
 
-    // // Create and save receipt
-    // const receipt = new Receipt({
-    //   userId,
-    //   category,
-    //   ...extractedData,
-    //   imageUrl,
-    // });
+    console.log("Extracted data:", extractedData);
 
-    // await receipt.save();
-    // res.json({ success: true, data: receipt });
-
-    console.log('check');
-    
+    res.json({ success: true, data: { userId, category, imageUrl, ...extractedData } });
   } catch (error) {
     console.error("Receipt processing error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
+export const saveReceipt = async (req, res) => {
+  try {
+    const { userId, category, imageUrl, ...extractedData } = req.body;
+
+    const receipt = new Receipt({ userId, category, imageUrl, ...extractedData });
+    await receipt.save();
+
+    res.json({ success: true, message: "Receipt saved successfully!" });
+  } catch (error) {
+    console.error("Save receipt error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 // // Get receipts for a user
 // app.get("/api/receipts/:userId", async (req, res) => {
 //   try {

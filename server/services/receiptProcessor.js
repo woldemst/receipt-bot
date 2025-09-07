@@ -18,7 +18,7 @@ class ReceiptProcessor {
       formData.append("file", buffer, "receipt.jpg");
 
       // Sende an OCR-Server
-      const response = await axios.post(`${API_URL}/ocr`, formData, {
+      const response = await axios.post(`${this.API_URL}/ocr`, formData, {
         headers: formData.getHeaders(),
       });
 

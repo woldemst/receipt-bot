@@ -1,21 +1,26 @@
 import dotenv from "dotenv";
 import express from "express";
-import cors from "cors";
 import mongoose from "mongoose";
-import receiptRoutes from "./routes/ocr-routes.js";
+import { processReceipt } from "./controllers/ocr-controllers.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.BACK_PORT;
 
-app.use("/api", receiptRoutes);
+// CORS
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  // not like "GET", "POST", "PATCH", "DELETE" it does not work
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
 
-// Middleware
-app.use(cors());
+  next();
+});
 app.use(express.json());
 
-// Connect to MongoDB
+app.post("/api/process-receipt", processReceipt);
+
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => console.log("Server connected to MongoDB"))
